@@ -2,6 +2,7 @@ import time
 import sys
 import os
 import csv
+import json # <--- New import for reading the scenario file
 from datetime import datetime
 from pymavlink import mavutil
 
@@ -87,7 +88,6 @@ def move_drone_manual(connection):
         mavutil.mavlink.MAV_FRAME_LOCAL_OFFSET_NED,
         0b110111111000, x, y, z, 0, 0, 0, 0, 0, 0, 0, 0)
 
-# --- NEW: FLY TO COORDINATES ---
 def fly_to_coords(connection):
     print(f"\n{Colors.CYAN}🌍  FLY TO GLOBAL COORDINATES{Colors.ENDC}")
     try:
@@ -100,26 +100,20 @@ def fly_to_coords(connection):
 
     print(f"{Colors.WARNING}>> Flying to Lat:{lat}, Lon:{lon}, Alt:{alt}m...{Colors.ENDC}")
     
-    # Send Global Position Target
-    # Int format: Deg * 1E7
     connection.mav.set_position_target_global_int_send(
         0, connection.target_system, connection.target_component,
         mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
-        0b110111111000, # Type Mask (Only Position)
-        int(lat * 1e7), # Lat (Int)
-        int(lon * 1e7), # Lon (Int)
-        alt,            # Alt (Float)
+        0b110111111000, 
+        int(lat * 1e7), 
+        int(lon * 1e7), 
+        alt,            
         0, 0, 0, 0, 0, 0, 0, 0)
 
-# --- NEW: LAND & TURN OFF ---
 def land_and_stop(connection):
     print(f"\n{Colors.FAIL}🛑  INITIATING LANDING SEQUENCE...{Colors.ENDC}")
-    # Set Mode to LAND (Mode 9 for Copter)
-    # Alternatively send command: MAV_CMD_NAV_LAND (ID 21)
     send_command(connection, 21, 0, 0, 0, 0, 0, 0, 0)
     print(f"{Colors.WARNING}>> Drone is Landing... waiting for touch down.{Colors.ENDC}")
     
-    # Wait until disarmed (Landed)
     while True:
         msg = connection.recv_match(type='HEARTBEAT', blocking=True)
         if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED == 0:
@@ -137,6 +131,44 @@ def scenario_death_test(connection):
     set_param(connection, 'SIM_WIND_SPD', 20.0)
     set_param(connection, 'SIM_GPS_DISABLE', 1.0)
     print(f"{Colors.BOLD}>> TEST COMPLETE.{Colors.ENDC}")
+
+# --- NEW: AUTOMATED SCENARIO RUNNER ---
+def run_automated_scenario(connection, filepath):
+    print(f"\n{Colors.HEADER}🚀 LOADING AUTOMATED SCENARIO: {filepath}{Colors.ENDC}")
+    try:
+        with open(filepath, 'r') as file:
+            scenario = json.load(file)
+    except Exception as e:
+        print(f"{Colors.FAIL}Failed to load scenario: {e}{Colors.ENDC}")
+        return
+
+    for step in scenario:
+        action = step.get("action")
+        print(f"\n{Colors.CYAN}[EXECUTING STEP] -> {action}{Colors.ENDC}")
+        
+        if action == "takeoff":
+            auto_launch_smart(connection)
+        
+        elif action == "delay":
+            t = step.get("time", 5)
+            print(f"Waiting for {t} seconds...")
+            time.sleep(t)
+        
+        elif action == "inject_wind":
+            speed = step.get("speed", 15.0)
+            print(f"{Colors.WARNING}Injecting {speed}m/s wind...{Colors.ENDC}")
+            set_param(connection, 'SIM_WIND_SPD', speed)
+        
+        elif action == "gps_fail":
+            enable = step.get("enable", 1.0)
+            status = "FAILING GPS" if enable == 1.0 else "RESTORING GPS"
+            print(f"{Colors.FAIL}{status}...{Colors.ENDC}")
+            set_param(connection, 'SIM_GPS_DISABLE', enable)
+            
+        elif action == "land":
+            land_and_stop(connection)
+            
+    print(f"\n{Colors.GREEN}✅ AUTOMATED SCENARIO COMPLETE.{Colors.ENDC}")
 
 def main():
     clear_screen()
@@ -159,6 +191,7 @@ def main():
         print(f"7. {Colors.CYAN}🌍   Fly to Coordinates (Lat/Lon){Colors.ENDC}")
         print(f"8. {Colors.FAIL}🛑   Land & Turn Off (Stop){Colors.ENDC}")
         print(f"9. Exit")
+        print(f"10. {Colors.HEADER}🤖  Run Automated JSON Scenario{Colors.ENDC}") # <--- Option 10 added
         
         choice = input(f"\n{Colors.BOLD}Select Mission:{Colors.ENDC} ")
 
@@ -174,6 +207,9 @@ def main():
         elif choice == '7': fly_to_coords(conn)
         elif choice == '8': land_and_stop(conn)
         elif choice == '9': break
+        elif choice == '10': # <--- Option 10 logic added
+            filename = input(f"Enter scenario filename (e.g., death_test.json): ")
+            run_automated_scenario(conn, filename)
 
 if __name__ == "__main__":
     main()

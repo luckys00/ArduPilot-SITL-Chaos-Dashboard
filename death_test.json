@@ -1,0 +1,9 @@
+[
+    {"action": "takeoff", "alt": 20},
+    {"action": "delay", "time": 10},
+    {"action": "inject_wind", "speed": 25},
+    {"action": "delay", "time": 5},
+    {"action": "gps_fail", "enable": 1},
+    {"action": "delay", "time": 10},
+    {"action": "land"}
+]
